@@ -171,25 +171,26 @@ public class Glob: Collection {
     }
 
     private func exploreDirectories(path: String) throws -> [String] {
-        try FileManager.default.contentsOfDirectory(atPath: path)
-            .compactMap { subpath -> [String]? in
-                if blacklistedDirectories.contains(subpath) {
-                    return nil
-                }
-                let firstLevelPath = NSString(string: path).appendingPathComponent(subpath)
-                guard isDirectory(path: firstLevelPath) else {
-                    return nil
-                }
-                var subDirs: [String] = try FileManager.default.subpathsOfDirectory(atPath: firstLevelPath)
-                    .compactMap { subpath -> String? in
-                        let fullPath = NSString(string: firstLevelPath).appendingPathComponent(subpath)
-                        return isDirectory(path: fullPath) ? fullPath : nil
-                    }
-                subDirs.append(firstLevelPath)
-                return subDirs
-            }
-            .joined()
-            .array()
+        var path = path
+        if path.hasSuffix("/") {
+            path = String(path.dropLast())
+        }
+        
+        let excludeParameters = blacklistedDirectories.map { #"! -path "*/\#($0)/*" ! -name "\#($0)""#}.joined(separator: " ")
+        let exploreCommand = #"find "\#(path)" -type d \#(excludeParameters)"#
+        
+        let task = Process()
+        let pipe = Pipe()
+
+        task.standardOutput = pipe
+        task.arguments = ["-c", exploreCommand]
+        task.launchPath = "/bin/bash"
+        task.launch()
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(decoding: data, as: UTF8.self)
+        
+        return Array(output.components(separatedBy: "\n").dropLast().dropFirst())
     }
 
     private func isDirectory(path: String) -> Bool {
